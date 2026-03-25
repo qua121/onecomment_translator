@@ -7,6 +7,7 @@
 - わんコメ v5.2 以上
 - 翻訳エンジン（いずれか）:
   - **DeepL**（推奨）: インターネット接続 + DeepL アカウント（無料）
+  - **Google翻訳**: インターネット接続 + Google Cloud アカウント
   - **Ollama**: NVIDIA GPU推奨（VRAM 6GB以上）、インターネット不要
 
 ## 導入手順
@@ -39,7 +40,15 @@
 #### DeepL を使う場合
 
 1. **設定** タブを開く
-2. DeepL APIキーを入力して **保存**
+2. 翻訳エンジンを **DeepL** に選択
+3. DeepL APIキーを入力して **保存**
+
+#### Google翻訳 を使う場合
+
+1. [Google Cloud Console](https://console.cloud.google.com/apis/library/translate.googleapis.com) で **Cloud Translation API** を有効化
+2. APIキーを発行する（認証情報 → APIキーを作成）
+3. **設定** タブで翻訳エンジンを **Google翻訳** に選択
+4. Google Cloud APIキーを入力して **保存**
 
 #### Ollama（ローカルLLM）を使う場合
 
@@ -74,17 +83,21 @@
 
 ### データの外部送信について
 
-このプラグインは翻訳のため、**コメントのテキストをDeepL社のサーバーに送信します**。
+選択した翻訳エンジンに応じて、**コメントのテキストが外部サーバーに送信されます**。
 
-- DeepL Free APIでは、送信されたテキストがDeepLのサービス改善に使用される場合があります
-- DeepL Pro APIでは、翻訳後すぐに削除されます
-- 詳細は [DeepL利用規約](https://www.deepl.com/terms) をご確認ください
+| エンジン | 送信先 | 備考 |
+|----------|--------|------|
+| DeepL | DeepL社サーバー | Free APIはサービス改善に使用される場合あり |
+| Google翻訳 | Google社サーバー | [Google Cloud プライバシーポリシー](https://cloud.google.com/terms/cloud-privacy-notice) 参照 |
+| Ollama | ローカルのみ | 外部送信なし |
 
-ユーザー自身がAPIキーを発行・設定することで、この送信に同意したものとみなします。
+ユーザー自身がAPIキーを発行・設定することで、各サービスへの送信に同意したものとみなします。
 
 ### 文字数制限について
 
 DeepL Free APIは月50万文字まで無料です。通常の配信コメント量では超過しませんが、超過した場合はエラータブに通知が表示されます。
+
+Google Cloud Translation API は一定量（月500,000文字）の無料枠があります。超過後は従量課金となります。詳細は [Google Cloud 料金ページ](https://cloud.google.com/translate/pricing) を確認してください。
 
 ---
 
@@ -107,6 +120,12 @@ DeepL Free APIは月50万文字まで無料です。通常の配信コメント�
 - コメントのテキストが DeepL 社のサーバーに送信されます
 - DeepL Free API では、送信されたテキストがサービス改善に利用される場合があります
 - DeepL の利用規約（[https://www.deepl.com/terms](https://www.deepl.com/terms)）への準拠はユーザーの責任です
+
+#### Google翻訳 を使用する場合
+
+- コメントのテキストが Google 社のサーバーに送信されます
+- Cloud Translation API の利用規約（[https://cloud.google.com/terms](https://cloud.google.com/terms)）への準拠はユーザーの責任です
+- 無料枠超過後は従量課金が発生します。利用量の管理はユーザーの責任です
 
 #### Ollama（ローカルLLM）を使用する場合
 

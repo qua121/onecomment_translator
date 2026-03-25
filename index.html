@@ -584,7 +584,7 @@
   <div class="settings-section">
     <div class="settings-title">翻訳エンジン設定</div>
 
-    <div class="form-row">
+    <div class="form-row" id="deeplKeyRow">
       <label for="apiKey">DeepL APIキー（Free / Pro 自動判定）</label>
       <input
         type="password"
@@ -599,10 +599,25 @@
       </span>
     </div>
 
+    <div class="form-row" id="googleKeyRow" style="display:none">
+      <label for="googleApiKey">Google Cloud APIキー</label>
+      <input
+        type="password"
+        id="googleApiKey"
+        placeholder="AIzaSy..."
+        autocomplete="off"
+      />
+      <span style="font-size:11px; color:var(--text-dim)">
+        <a href="https://console.cloud.google.com/apis/library/translate.googleapis.com" target="_blank" style="color:var(--accent)">Google Cloud Console</a> でCloud Translation APIを有効化し、APIキーを発行してください。
+        ※ コメントテキストがGoogleサーバーに送信されます
+      </span>
+    </div>
+
     <div class="form-row">
       <label for="engineSelect">翻訳エンジン</label>
       <select id="engineSelect" onchange="onEngineChange(this.value)">
         <option value="deepl">DeepL（推奨）</option>
+        <option value="google">Google翻訳</option>
         <option value="ollama">ローカル / Ollama</option>
       </select>
     </div>
@@ -957,9 +972,10 @@ OLLAMA_KV_CACHE_TYPE=q8_0</div>
       const res = await fetch(`${API_BASE}?type=settings`)
       const json = await res.json()
       const s = json.response || json
-      document.getElementById('apiKey').value       = s.apiKeySet ? '（設定済み）' : ''
-      document.getElementById('engineSelect').value  = s.engine || 'deepl'
-      document.getElementById('targetLang').value    = s.targetLang || 'JA'
+      document.getElementById('apiKey').value          = s.apiKeySet ? '（設定済み）' : ''
+      document.getElementById('googleApiKey').value    = s.googleApiKeySet ? '（設定済み）' : ''
+      document.getElementById('engineSelect').value    = s.engine || 'deepl'
+      document.getElementById('targetLang').value      = s.targetLang || 'JA'
       document.getElementById('ollamaModelText').value = s.ollamaModel || 'translategemma:4b'
       onEngineChange(s.engine || 'deepl')
     } catch (e) {
@@ -968,15 +984,16 @@ OLLAMA_KV_CACHE_TYPE=q8_0</div>
   }
 
   function onEngineChange(engine) {
-    document.getElementById('ollamaModelRow').style.display =
-      engine === 'ollama' ? '' : 'none'
-    document.getElementById('apiKey').closest('.form-row').style.display =
-      engine === 'ollama' ? 'none' : ''
+    document.getElementById('deeplKeyRow').style.display  = engine === 'deepl'  ? '' : 'none'
+    document.getElementById('googleKeyRow').style.display = engine === 'google' ? '' : 'none'
+    document.getElementById('ollamaModelRow').style.display = engine === 'ollama' ? '' : 'none'
   }
 
   async function saveSettings() {
-    const apiKeyEl = document.getElementById('apiKey')
-    const apiKeyVal = apiKeyEl.value.trim()
+    const apiKeyEl       = document.getElementById('apiKey')
+    const googleApiKeyEl = document.getElementById('googleApiKey')
+    const apiKeyVal       = apiKeyEl.value.trim()
+    const googleApiKeyVal = googleApiKeyEl.value.trim()
 
     const body = {
       engine:      document.getElementById('engineSelect').value,
@@ -986,6 +1003,9 @@ OLLAMA_KV_CACHE_TYPE=q8_0</div>
 
     if (apiKeyVal && apiKeyVal !== '（設定済み）') {
       body.apiKey = apiKeyVal
+    }
+    if (googleApiKeyVal && googleApiKeyVal !== '（設定済み）') {
+      body.googleApiKey = googleApiKeyVal
     }
 
     try {
@@ -1001,6 +1021,9 @@ OLLAMA_KV_CACHE_TYPE=q8_0</div>
         result.style.color = 'var(--ok)'
         if (body.apiKey) {
           apiKeyEl.value = '（設定済み）'
+        }
+        if (body.googleApiKey) {
+          googleApiKeyEl.value = '（設定済み）'
         }
       } else {
         result.textContent = '❌ 保存に失敗しました'

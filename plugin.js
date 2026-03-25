@@ -4,9 +4,11 @@ const https = require('https')
 const http  = require('http')
 
 const PLUGIN_UID = 'com.qua121.comment-translator'
-const DEEPL_FREE_API_HOST = 'api-free.deepl.com'
-const DEEPL_PRO_API_HOST  = 'api.deepl.com'
-const DEEPL_API_PATH      = '/v2/translate'
+const DEEPL_FREE_API_HOST   = 'api-free.deepl.com'
+const DEEPL_PRO_API_HOST    = 'api.deepl.com'
+const DEEPL_API_PATH        = '/v2/translate'
+const GOOGLE_TRANSLATE_HOST = 'translation.googleapis.com'
+const GOOGLE_TRANSLATE_PATH = '/language/translate/v2'
 const OLLAMA_HOST = 'localhost'
 const OLLAMA_PORT = 11434
 const OLLAMA_PATH = '/api/chat'
@@ -17,6 +19,17 @@ const QUEUE_CONCURRENCY = 2
 const REQUEST_TIMEOUT_MS = 30000
 const OLLAMA_TIMEOUT_MS       = 300000   // 通常翻訳: 5分
 const OLLAMA_FIRST_TIMEOUT_MS = 3600000  // 初回モデルロード: 1時間
+
+const GOOGLE_LANG_MAP = {
+  'JA':    'ja',
+  'EN-US': 'en',
+  'EN-GB': 'en',
+  'ZH':    'zh',
+  'KO':    'ko',
+  'FR':    'fr',
+  'DE':    'de',
+  'ES':    'es',
+}
 
 const LANG_NAME_FOR_PROMPT = {
   'JA':    'Japanese',
@@ -145,6 +158,50 @@ class LRUCache {
 
 function isDeepLFreeKey(apiKey) {
   return apiKey.endsWith(':fx')
+}
+
+function callGoogleTranslateAPI(text, apiKey, targetLang = 'JA') {
+  return new Promise((resolve, reject) => {
+    const target = GOOGLE_LANG_MAP[targetLang] || targetLang.toLowerCase().split('-')[0]
+    const body = JSON.stringify({ q: text, target, format: 'text' })
+
+    const options = {
+      hostname: GOOGLE_TRANSLATE_HOST,
+      path: `${GOOGLE_TRANSLATE_PATH}?key=${encodeURIComponent(apiKey)}`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }
+
+    const req = https.request(options, (res) => {
+      let data = ''
+      res.on('data', (chunk) => { data += chunk })
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try {
+            const json = JSON.parse(data)
+            resolve(json.data.translations[0].translatedText)
+          } catch (e) {
+            reject({ code: 'PARSE_ERROR', message: e.message })
+          }
+        } else {
+          reject({ code: `GOOGLE_${res.statusCode}`, message: data })
+        }
+      })
+    })
+
+    req.on('error', (e) => reject({ code: 'GOOGLE_NETWORK_ERROR', message: e.message }))
+
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      req.destroy()
+      reject({ code: 'TIMEOUT', message: 'Request timed out' })
+    })
+
+    req.write(body)
+    req.end()
+  })
 }
 
 function callDeepLAPI(text, apiKey, targetLang = 'JA') {
@@ -346,6 +403,26 @@ const ERROR_CATALOG = {
     solution: 'デバッグログを確認してください',
     link: null,
   },
+  GOOGLE_403: {
+    cause: 'Google APIキーが無効、またはCloud Translation APIが有効化されていません',
+    solution: 'Google Cloud ConsoleでAPIキーとCloud Translation APIの設定を確認してください',
+    link: 'https://console.cloud.google.com/apis/library/translate.googleapis.com',
+  },
+  GOOGLE_400: {
+    cause: 'Google翻訳APIへのリクエストが不正です',
+    solution: 'デバッグログを確認してください',
+    link: null,
+  },
+  GOOGLE_429: {
+    cause: 'Google翻訳APIのレート制限に達しました',
+    solution: 'しばらく待つと自動回復します',
+    link: null,
+  },
+  GOOGLE_NETWORK_ERROR: {
+    cause: 'Google翻訳サーバーに接続できません',
+    solution: 'インターネット接続を確認してください',
+    link: null,
+  },
 }
 
 function categorizeError(code) {
@@ -366,6 +443,7 @@ const plugin = {
 
   defaultState: {
     apiKey: '',
+    googleApiKey: '',
     engine: 'deepl',
     targetLang: 'JA',
     ollamaModel: 'translategemma:4b',
@@ -394,8 +472,11 @@ const plugin = {
     this._log('INFO', `plugin dir: ${dir}`)
     this._log('INFO', `engine: ${store.get('engine')} / targetLang: ${store.get('targetLang')}`)
 
-    if (store.get('engine') !== 'ollama' && !store.get('apiKey')) {
+    const engine = store.get('engine')
+    if (engine === 'deepl' && !store.get('apiKey')) {
       this._log('INFO', 'DeepL APIキーが未設定です。設定ページから入力してください。')
+    } else if (engine === 'google' && !store.get('googleApiKey')) {
+      this._log('INFO', 'Google APIキーが未設定です。設定ページから入力してください。')
     }
   },
 
@@ -458,12 +539,13 @@ const plugin = {
     const engine = store.get('engine') || 'deepl'
     const targetLang = store.get('targetLang') || 'JA'
 
-    if (engine === 'deepl') {
-      const apiKey = store.get('apiKey')
-      if (!apiKey) {
-        this._log('DEBUG', `翻訳スキップ: APIキー未設定 (text="${text.slice(0, 20)}")`)
-        return
-      }
+    if (engine === 'deepl' && !store.get('apiKey')) {
+      this._log('DEBUG', `翻訳スキップ: DeepL APIキー未設定 (text="${text.slice(0, 20)}")`)
+      return
+    }
+    if (engine === 'google' && !store.get('googleApiKey')) {
+      this._log('DEBUG', `翻訳スキップ: Google APIキー未設定 (text="${text.slice(0, 20)}")`)
+      return
     }
 
     const cached = this._translationCache?.get(text)
@@ -507,6 +589,12 @@ const plugin = {
             throw retryErr
           }
         }
+      } else if (engine === 'google') {
+        const googleApiKey = store.get('googleApiKey')
+        this._log('INFO', `google translate: "${text.slice(0, 20)}"`)
+        translated = await this._queue.add(() =>
+          callGoogleTranslateAPI(text, googleApiKey, targetLang)
+        )
       } else {
         const apiKey = store.get('apiKey')
         translated = await this._queue.add(() =>
@@ -625,6 +713,7 @@ const plugin = {
             code: 200,
             response: {
               apiKeySet: !!store.get('apiKey'),
+              googleApiKeySet: !!store.get('googleApiKey'),
               engine: store.get('engine'),
               targetLang: store.get('targetLang'),
               ollamaModel: store.get('ollamaModel') || 'translategemma:4b',
@@ -655,7 +744,10 @@ const plugin = {
           store.set('apiKey', body.apiKey)
           this._commentStructureLogged = false
         }
-        if (body.engine !== undefined && (body.engine === 'deepl' || body.engine === 'ollama')) {
+        if (body.googleApiKey !== undefined) {
+          store.set('googleApiKey', body.googleApiKey)
+        }
+        if (body.engine !== undefined && (body.engine === 'deepl' || body.engine === 'ollama' || body.engine === 'google')) {
           store.set('engine', body.engine)
           if (this._translationCache) this._translationCache.clear()
         }
