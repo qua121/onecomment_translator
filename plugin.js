@@ -37,19 +37,30 @@ const SOURCE_LANG_FOR_PROMPT = {
 }
 
 const LANG_PATTERNS = {
-  JA: /[\u3040-\u309F\u30A0-\u30FF]/,
-  KO: /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/,
-  ZH: /[\u4E00-\u9FFF\u3400-\u4DBF\u{20000}-\u{2A6DF}]/u,
+  JA: /[\u3040-\u309F\u30A0-\u30FF]/g,
+  KO: /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/g,
+  ZH: /[\u4E00-\u9FFF\u3400-\u4DBF\u{20000}-\u{2A6DF}]/gu,
 }
 
-function isJapanese(text) {
-  return LANG_PATTERNS.JA.test(text)
-}
+/** 言語判定に必要な最低スクリプト文字数。1文字の混入による誤判定を防ぐ */
+const SCRIPT_MIN_COUNT = 2
+/** 全文字中の該当スクリプト占有率の閾値。英語主体コメントの誤判定を抑制 */
+const SCRIPT_RATIO_THRESHOLD = 0.25
 
 function detectLang(text) {
-  if (LANG_PATTERNS.JA.test(text)) return 'JA'
-  if (LANG_PATTERNS.KO.test(text)) return 'KO'
-  if (LANG_PATTERNS.ZH.test(text)) return 'ZH'
+  const letters = text.replace(/[\s\p{P}\p{S}\p{N}]/gu, '').length
+  // shouldSkipを通過しても絵文字のみ等でlettersが0になるケースへの防御
+  if (letters === 0) return 'OTHER'
+
+  const jaCount = (text.match(LANG_PATTERNS.JA) || []).length
+  if (jaCount >= SCRIPT_MIN_COUNT && jaCount / letters >= SCRIPT_RATIO_THRESHOLD) return 'JA'
+
+  const koCount = (text.match(LANG_PATTERNS.KO) || []).length
+  if (koCount >= SCRIPT_MIN_COUNT && koCount / letters >= SCRIPT_RATIO_THRESHOLD) return 'KO'
+
+  const zhCount = (text.match(LANG_PATTERNS.ZH) || []).length
+  if (zhCount >= SCRIPT_MIN_COUNT && zhCount / letters >= SCRIPT_RATIO_THRESHOLD) return 'ZH'
+
   return 'OTHER'
 }
 
